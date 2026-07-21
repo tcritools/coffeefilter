@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>coffee.filter — resize & compress for Shopify</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  :root{
+    --bg:#FFFFFF;
+    --surface:#F4F4F4;
+    --ink:#111111;
+    --ink-soft:#6E6E6E;
+    --line:#DADADA;
+    --accent:#1A1A1A;
+    --accent-soft:#E7E7E7;
+    --gold:#3D3D3D;
+    --gold-soft:#EDEDED;
+    --err:#6B2B2B;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+  }
+  .wrap{
+    max-width:1100px;
+    margin:0 auto;
+    padding:48px 24px 80px;
+  }
+  header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:16px;
+    margin-bottom:36px;
+    border-bottom:2px solid var(--ink);
+    padding-bottom:18px;
+  }
+  h1{
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:600;
+    font-size:28px;
+    margin:0;
+    letter-spacing:-0.02em;
+    color:var(--ink);
+  }
+  h1 span{color:var(--ink-soft);}
+  header p{
+    margin:0;
+    font-size:13px;
+    color:var(--ink-soft);
+    font-family:'IBM Plex Mono',monospace;
+    text-align:right;
+  }
+
+  .layout{
+    display:grid;
+    grid-template-columns:300px 1fr;
+    gap:28px;
+  }
+  @media (max-width:800px){
+    .layout{grid-template-columns:1fr;}
+  }
+
+  .panel{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:22px;
+  }
+  .panel h2{
+    font-family:'Fraunces',serif;
+    font-size:16px;
+    font-weight:600;
+    margin:0 0 14px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+  }
+
+  .field{margin-bottom:20px;}
+  .field label{
+    display:block;
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    margin-bottom:8px;
+  }
+  .field .val{
+    font-family:'IBM Plex Mono',monospace;
+    color:var(--accent);
+    font-weight:600;
+  }
+  input[type=range]{
+    width:100%;
+    accent-color:var(--accent);
+  }
+  .toggle-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size:13px;
+    padding:8px 0;
+    border-top:1px solid var(--line);
+  }
+  .toggle-row:first-child{border-top:none;}
+  input[type=checkbox]{
+    accent-color:var(--accent);
+    width:16px;height:16px;
+  }
+
+  .dropzone{
+    border:2px dashed var(--ink-soft);
+    border-radius:6px;
+    padding:48px 20px;
+    text-align:center;
+    cursor:pointer;
+    background:var(--surface);
+    transition:border-color .15s, background .15s;
+  }
+  .dropzone.drag{
+    border-color:var(--accent);
+    background:var(--accent-soft);
+  }
+  .dropzone p{margin:0;color:var(--ink-soft);font-size:14px;}
+  .dropzone .big{
+    font-family:'Fraunces',serif;
+    font-size:19px;
+    color:var(--ink);
+    margin-bottom:6px;
+    font-weight:600;
+  }
+  .dropzone input{display:none;}
+
+  .actions{
+    display:flex;
+    gap:10px;
+    margin-top:18px;
+    flex-wrap:wrap;
+  }
+  button{
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:13px;
+    padding:11px 18px;
+    border-radius:4px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:var(--surface);
+    cursor:pointer;
+  }
+  button.secondary{
+    background:transparent;
+    color:var(--ink);
+  }
+  button:disabled{
+    opacity:.4;
+    cursor:not-allowed;
+  }
+  button:hover:not(:disabled){opacity:.85;}
+
+  .note{
+    font-size:12px;
+    color:var(--ink-soft);
+    line-height:1.5;
+    margin-top:14px;
+  }
+
+  .list{margin-top:26px;}
+  .row{
+    display:grid;
+    grid-template-columns:56px 1fr auto auto;
+    align-items:center;
+    gap:16px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:12px 16px;
+    margin-bottom:10px;
+  }
+  .row img{
+    width:56px;height:56px;object-fit:cover;border-radius:3px;border:1px solid var(--line);
+  }
+  .row .name{
+    font-size:13px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .row .dims{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;color:var(--ink-soft);
+  }
+  .row .sizes{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    text-align:right;
+    white-space:nowrap;
+  }
+  .row .sizes .old{color:var(--ink-soft);text-decoration:line-through;margin-right:6px;}
+  .row .sizes .new{color:var(--ink);font-weight:600;}
+
+  .stamp{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    font-weight:600;
+    color:var(--accent);
+    border:1.5px solid var(--accent);
+    border-radius:999px;
+    padding:4px 10px;
+    transform:rotate(-4deg);
+    white-space:nowrap;
+  }
+  .stamp.pending{color:var(--ink-soft);border-color:var(--line);transform:none;}
+  .stamp.error{color:var(--err);border-color:var(--err);transform:none;}
+
+  .dl-link{
+    font-size:11px;
+    text-decoration:underline;
+    color:var(--ink-soft);
+    cursor:pointer;
+    background:none;border:none;padding:0;
+    font-family:'Inter',sans-serif;
+    font-weight:500;
+  }
+
+  .summary{
+    margin-top:18px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+    color:var(--ink-soft);
+    display:flex;
+    gap:24px;
+    flex-wrap:wrap;
+  }
+  .summary b{color:var(--ink);}
+
+  .empty{
+    text-align:center;
+    padding:60px 20px;
+    color:var(--ink-soft);
+    font-size:14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>coffee<span>.</span>filter</h1>
+    <p>resize to 5000px max&nbsp;&middot;&nbsp;shrink filesize<br>runs entirely in your browser</p>
+  </header>
+
+  <div class="layout">
+    <div class="panel">
+      <h2>Settings</h2>
+
+      <div class="field">
+        <label>Max long edge <span class="val" id="dimVal">5000px</span></label>
+        <input type="range" id="dimSlider" min="1000" max="5000" step="100" value="5000">
+      </div>
+
+      <div class="field">
+        <label>JPEG quality <span class="val" id="qVal">90%</span></label>
+        <input type="range" id="qSlider" min="50" max="100" step="1" value="90">
+      </div>
+
+      <div class="toggle-row">
+        <span>Add "-web" suffix</span>
+        <input type="checkbox" id="suffixToggle" checked>
+      </div>
+      <div class="toggle-row">
+        <span>Save straight to a folder</span>
+        <input type="checkbox" id="fsToggle" checked>
+      </div>
+
+      <p class="note" id="fsNote">Uses your browser's file system access — pick a folder once and every processed photo saves there directly, no zip, no separate downloads to wrangle.</p>
+    </div>
+
+    <div>
+      <div class="dropzone" id="dropzone">
+        <div class="big">Drop photos here</div>
+        <p>or click to choose files — one photo or a whole batch</p>
+        <input type="file" id="fileInput" accept="image/*" multiple>
+      </div>
+
+      <div class="actions">
+        <button id="processBtn" disabled>Process photos</button>
+        <button class="secondary" id="clearBtn" disabled>Clear</button>
+      </div>
+
+      <div class="summary" id="summary" style="display:none;">
+        <span><b id="sumCount">0</b> photos</span>
+        <span>original <b id="sumOld">0 MB</b></span>
+        <span>optimized <b id="sumNew">0 MB</b></span>
+        <span>saved <b id="sumPct">0%</b></span>
+      </div>
+
+      <div class="list" id="list">
+        <div class="empty" id="emptyState">No photos loaded yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const processBtn = document.getElementById('processBtn');
+const clearBtn = document.getElementById('clearBtn');
+const list = document.getElementById('list');
+const emptyState = document.getElementById('emptyState');
+const dimSlider = document.getElementById('dimSlider');
+const dimVal = document.getElementById('dimVal');
+const qSlider = document.getElementById('qSlider');
+const qVal = document.getElementById('qVal');
+const suffixToggle = document.getElementById('suffixToggle');
+const fsToggle = document.getElementById('fsToggle');
+const fsNote = document.getElementById('fsNote');
+const summary = document.getElementById('summary');
+
+const hasFS = 'showDirectoryPicker' in window;
+if(!hasFS){
+  fsToggle.checked = false;
+  fsToggle.disabled = true;
+  fsNote.textContent = "Your browser doesn't support saving straight to a folder (that's a Chrome/Edge feature), so processed photos will download individually instead — you'll get a permission prompt to allow multiple downloads from this page.";
+}
+
+dimSlider.oninput = () => dimVal.textContent = dimSlider.value + 'px';
+qSlider.oninput = () => qVal.textContent = qSlider.value + '%';
+
+let items = []; // {file, id, status, origSize, newSize, blob, outW, outH, thumbURL, error}
+let dirHandle = null;
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+function addFiles(fileList){
+  const imgs = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+  imgs.forEach(file => {
+    const id = Math.random().toString(36).slice(2);
+    items.push({
+      file, id, status:'pending',
+      origSize:file.size, newSize:null,
+      blob:null, outW:null, outH:null,
+      thumbURL: URL.createObjectURL(file),
+      error:null
+    });
+  });
+  render();
+  processBtn.disabled = items.length === 0;
+  clearBtn.disabled = items.length === 0;
+}
+
+function fmtBytes(b){
+  if(b < 1024) return b + ' B';
+  if(b < 1024*1024) return (b/1024).toFixed(0) + ' KB';
+  return (b/1024/1024).toFixed(2) + ' MB';
+}
+
+function render(){
+  if(items.length === 0){
+    list.innerHTML = '';
+    list.appendChild(emptyState);
+    summary.style.display = 'none';
+    return;
+  }
+  emptyState.remove();
+  list.innerHTML = '';
+  items.forEach(it => {
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const img = document.createElement('img');
+    img.src = it.thumbURL;
+
+    const nameWrap = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = it.file.name;
+    const dims = document.createElement('div');
+    dims.className = 'dims';
+    dims.textContent = it.outW ? `${it.outW}×${it.outH}px` : 'not processed yet';
+    nameWrap.appendChild(name);
+    nameWrap.appendChild(dims);
+
+    const sizes = document.createElement('div');
+    sizes.className = 'sizes';
+    if(it.newSize){
+      sizes.innerHTML = `<span class="old">${fmtBytes(it.origSize)}</span><span class="new">${fmtBytes(it.newSize)}</span>`;
+    } else {
+      sizes.innerHTML = `<span class="new">${fmtBytes(it.origSize)}</span>`;
+    }
+
+    const stamp = document.createElement('div');
+    if(it.status === 'done'){
+      const pct = Math.round((1 - it.newSize/it.origSize) * 100);
+      stamp.className = 'stamp';
+      stamp.textContent = pct > 0 ? `-${pct}%` : 'resized';
+    } else if(it.status === 'error'){
+      stamp.className = 'stamp error';
+      stamp.textContent = 'error';
+    } else if(it.status === 'saved'){
+      stamp.className = 'stamp';
+      stamp.textContent = 'saved ✓';
+    } else {
+      stamp.className = 'stamp pending';
+      stamp.textContent = it.status === 'processing' ? 'working…' : 'queued';
+    }
+
+    row.appendChild(img);
+    row.appendChild(nameWrap);
+    row.appendChild(sizes);
+    row.appendChild(stamp);
+    list.appendChild(row);
+  });
+  updateSummary();
+}
+
+function updateSummary(){
+  const done = items.filter(i => i.newSize);
+  if(done.length === 0){ summary.style.display='none'; return; }
+  summary.style.display = 'flex';
+  const oldSum = done.reduce((a,i)=>a+i.origSize,0);
+  const newSum = done.reduce((a,i)=>a+i.newSize,0);
+  document.getElementById('sumCount').textContent = done.length;
+  document.getElementById('sumOld').textContent = fmtBytes(oldSum);
+  document.getElementById('sumNew').textContent = fmtBytes(newSum);
+  document.getElementById('sumPct').textContent = Math.round((1-newSum/oldSum)*100) + '%';
+}
+
+clearBtn.addEventListener('click', () => {
+  items.forEach(i => URL.revokeObjectURL(i.thumbURL));
+  items = [];
+  fileInput.value = '';
+  processBtn.disabled = true;
+  clearBtn.disabled = true;
+  render();
+});
+
+async function processOne(it, maxDim, quality){
+  it.status = 'processing';
+  render();
+  try{
+    const bitmap = await createImageBitmap(it.file);
+    const {width, height} = bitmap;
+    const scale = Math.min(1, maxDim / Math.max(width, height));
+    const outW = Math.max(1, Math.round(width * scale));
+    const outH = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, outW, outH);
+
+    const isPng = it.file.type === 'image/png';
+    const mime = isPng ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise(res => canvas.toBlob(res, mime, isPng ? undefined : quality));
+
+    it.blob = blob;
+    it.newSize = blob.size;
+    it.outW = outW;
+    it.outH = outH;
+    it.status = 'done';
+    bitmap.close && bitmap.close();
+  } catch(err){
+    it.status = 'error';
+    it.error = err.message;
+  }
+  render();
+}
+
+function outName(originalName){
+  const addSuffix = suffixToggle.checked;
+  if(!addSuffix) return originalName;
+  const dot = originalName.lastIndexOf('.');
+  if(dot === -1) return originalName + '-web';
+  return originalName.slice(0,dot) + '-web' + originalName.slice(dot);
+}
+
+processBtn.addEventListener('click', async () => {
+  const maxDim = parseInt(dimSlider.value, 10);
+  const quality = parseInt(qSlider.value, 10) / 100;
+  const useFS = fsToggle.checked && hasFS;
+
+  processBtn.disabled = true;
+  clearBtn.disabled = true;
+
+  if(useFS){
+    try{
+      dirHandle = await window.showDirectoryPicker();
+    } catch(e){
+      // user cancelled the picker
+      processBtn.disabled = false;
+      clearBtn.disabled = false;
+      return;
+    }
+  }
+
+  for(const it of items){
+    if(it.status === 'done' || it.status === 'saved') continue;
+    await processOne(it, maxDim, quality);
+    if(it.status === 'done' && useFS && dirHandle){
+      try{
+        const fileHandle = await dirHandle.getFileHandle(outName(it.file.name), {create:true});
+        const writable = await fileHandle.createWritable();
+        await writable.write(it.blob);
+        await writable.close();
+        it.status = 'saved';
+        render();
+      } catch(e){
+        it.status = 'error';
+        it.error = 'could not save to folder';
+        render();
+      }
+    }
+  }
+
+  if(!useFS){
+    // sequential downloads, staggered so the browser doesn't block them
+    const toDownload = items.filter(i => i.status === 'done' && i.blob);
+    for(let i=0; i<toDownload.length; i++){
+      const it = toDownload[i];
+      const url = URL.createObjectURL(it.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = outName(it.file.name);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      await new Promise(r => setTimeout(r, 350));
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  processBtn.disabled = false;
+  clearBtn.disabled = false;
+});
+</script>
+</body>
+</html>
