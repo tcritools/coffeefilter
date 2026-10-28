@@ -226,10 +226,17 @@
     font-size:13px;font-weight:bold;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
+  .row .thumb-ph{
+    width:56px;height:56px;border:1px solid var(--ink);
+    display:flex;align-items:center;justify-content:center;
+    background:#fafafa;
+    font-size:10px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;
+  }
   .row .dims{
     font-family:Arial, Helvetica, sans-serif;
     font-size:11px;color:var(--ink-soft);
   }
+  .row .dims.err{color:var(--err);}
   .row .sizes{
     font-family:Arial, Helvetica, sans-serif;
     font-size:12px;
@@ -290,7 +297,7 @@
 <body>
 <header>
   <h1>coffee<span>.</span>filter</h1>
-  <p>Resize to 5000px max &middot; shrink filesize &middot; runs entirely in your browser</p>
+  <p>Resize to 5000px max &middot; shrink filesize &middot; HEIC to JPG &middot; runs entirely in your browser</p>
 </header>
 <div class="wrap">
 
@@ -323,8 +330,8 @@
     <div>
       <div class="dropzone" id="dropzone">
         <div class="big">Drop photos here</div>
-        <p>or click to choose files — one photo or a whole batch</p>
-        <input type="file" id="fileInput" accept="image/*" multiple>
+        <p>or click to choose files — JPG, PNG or HEIC, one photo or a whole batch</p>
+        <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple>
       </div>
 
       <div class="actions">
@@ -336,7 +343,7 @@
         <span><b id="sumCount">0</b> photos</span>
         <span>original <b id="sumOld">0 MB</b></span>
         <span>optimized <b id="sumNew">0 MB</b></span>
-        <span>saved <b id="sumPct">0%</b></span>
+        <span><span id="sumPctLbl">saved</span> <b id="sumPct">0%</b></span>
       </div>
 
       <div class="list" id="list">
@@ -372,8 +379,59 @@ if(!hasFS){
 dimSlider.oninput = () => dimVal.textContent = dimSlider.value + 'px';
 qSlider.oninput = () => qVal.textContent = qSlider.value + '%';
 
-let items = []; // {file, id, status, origSize, newSize, blob, outW, outH, thumbURL, error}
+let items = []; // {file, id, status, phase, heic, origSize, newSize, blob, outW, outH, outMime, thumbURL, thumbFailed, error}
 let dirHandle = null;
+
+// ---- HEIC support ----
+// Safari reads HEIC natively; Chrome/Edge/Firefox don't, so we fall back to
+// libheif (via heic-to). It's ~3MB, so it only loads the first time a HEIC
+// actually needs decoding. Decoding still happens locally in the browser.
+const HEIC_LIB_URL = 'https://cdn.jsdelivr.net/npm/heic-to@1.6.7/dist/heic-to.js';
+let heicLibPromise = null;
+let heicLibReady = false;
+
+function loadHeicLib(){
+  if(!heicLibPromise){
+    heicLibPromise = import(HEIC_LIB_URL)
+      .then(mod => { heicLibReady = true; return mod; })
+      .catch(() => {
+        heicLibPromise = null; // allow a retry on the next run
+        throw new Error("couldn't load the HEIC decoder — check your connection and try again");
+      });
+  }
+  return heicLibPromise;
+}
+
+function isHeicFile(f){
+  return /^image\/hei[cf]/i.test(f.type) || /\.(heic|heif)$/i.test(f.name);
+}
+
+// Catches HEIC files with a missing or misleading extension/type
+async function sniffHeic(f){
+  try{
+    const head = new Uint8Array(await f.slice(4, 12).arrayBuffer());
+    const s = String.fromCharCode(...head);
+    return s.slice(0,4) === 'ftyp' && ['heic','heix','hevc','hevx','heim','heis','mif1','msf1'].includes(s.slice(4));
+  } catch(e){ return false; }
+}
+
+async function decodeImage(it){
+  try{
+    return await createImageBitmap(it.file);
+  } catch(nativeErr){
+    if(!it.heic && !(await sniffHeic(it.file))) throw nativeErr;
+    it.heic = true;
+  }
+  if(!heicLibReady){ it.phase = 'loading heic decoder…'; render(); }
+  const { heicTo } = await loadHeicLib();
+  it.phase = 'decoding heic…';
+  render();
+  try{
+    return await heicTo({ blob: it.file, type: 'bitmap' });
+  } catch(e){
+    throw new Error("couldn't decode this HEIC file");
+  }
+}
 
 dropzone.addEventListener('click', () => fileInput.click());
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
@@ -386,14 +444,16 @@ dropzone.addEventListener('drop', e => {
 fileInput.addEventListener('change', () => addFiles(fileInput.files));
 
 function addFiles(fileList){
-  const imgs = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+  const imgs = Array.from(fileList).filter(f => f.type.startsWith('image/') || isHeicFile(f));
   imgs.forEach(file => {
     const id = Math.random().toString(36).slice(2);
     items.push({
-      file, id, status:'pending',
+      file, id, status:'pending', phase:null,
+      heic: isHeicFile(file),
       origSize:file.size, newSize:null,
-      blob:null, outW:null, outH:null,
+      blob:null, outW:null, outH:null, outMime:null,
       thumbURL: URL.createObjectURL(file),
+      thumbFailed:false,
       error:null
     });
   });
@@ -421,8 +481,21 @@ function render(){
     const row = document.createElement('div');
     row.className = 'row';
 
-    const img = document.createElement('img');
-    img.src = it.thumbURL;
+    // Browsers that can't display HEIC get a placeholder until the JPG exists
+    const placeholder = () => {
+      const ph = document.createElement('div');
+      ph.className = 'thumb-ph';
+      ph.textContent = it.heic ? 'HEIC' : 'IMG';
+      return ph;
+    };
+    let img;
+    if(it.thumbFailed){
+      img = placeholder();
+    } else {
+      img = document.createElement('img');
+      img.onerror = () => { it.thumbFailed = true; img.replaceWith(placeholder()); };
+      img.src = it.thumbURL;
+    }
 
     const nameWrap = document.createElement('div');
     const name = document.createElement('div');
@@ -430,7 +503,14 @@ function render(){
     name.textContent = it.file.name;
     const dims = document.createElement('div');
     dims.className = 'dims';
-    dims.textContent = it.outW ? `${it.outW}×${it.outH}px` : 'not processed yet';
+    if(it.status === 'error'){
+      dims.classList.add('err');
+      dims.textContent = it.error || 'could not process this file';
+    } else if(it.outW){
+      dims.textContent = `${it.outW}×${it.outH}px` + (it.heic ? ' · converted to JPG' : '');
+    } else {
+      dims.textContent = it.heic ? 'HEIC · exports as JPG' : 'not processed yet';
+    }
     nameWrap.appendChild(name);
     nameWrap.appendChild(dims);
 
@@ -446,7 +526,7 @@ function render(){
     if(it.status === 'done'){
       const pct = Math.round((1 - it.newSize/it.origSize) * 100);
       stamp.className = 'stamp';
-      stamp.textContent = pct > 0 ? `-${pct}%` : 'resized';
+      stamp.textContent = pct > 0 ? `-${pct}%` : (it.heic ? 'to jpg' : 'resized');
     } else if(it.status === 'error'){
       stamp.className = 'stamp error';
       stamp.textContent = 'error';
@@ -455,7 +535,7 @@ function render(){
       stamp.textContent = 'saved ✓';
     } else {
       stamp.className = 'stamp pending';
-      stamp.textContent = it.status === 'processing' ? 'working…' : 'queued';
+      stamp.textContent = it.status === 'processing' ? (it.phase || 'working…') : 'queued';
     }
 
     row.appendChild(img);
@@ -476,7 +556,10 @@ function updateSummary(){
   document.getElementById('sumCount').textContent = done.length;
   document.getElementById('sumOld').textContent = fmtBytes(oldSum);
   document.getElementById('sumNew').textContent = fmtBytes(newSum);
-  document.getElementById('sumPct').textContent = Math.round((1-newSum/oldSum)*100) + '%';
+  // HEIC is already very efficient, so converting to JPG can make files bigger
+  const pct = Math.round((1-newSum/oldSum)*100);
+  document.getElementById('sumPctLbl').textContent = pct >= 0 ? 'saved' : 'grew';
+  document.getElementById('sumPct').textContent = Math.abs(pct) + '%';
 }
 
 clearBtn.addEventListener('click', () => {
@@ -492,7 +575,7 @@ async function processOne(it, maxDim, quality){
   it.status = 'processing';
   render();
   try{
-    const bitmap = await createImageBitmap(it.file);
+    const bitmap = await decodeImage(it);
     const {width, height} = bitmap;
     const scale = Math.min(1, maxDim / Math.max(width, height));
     const outW = Math.max(1, Math.round(width * scale));
@@ -508,27 +591,41 @@ async function processOne(it, maxDim, quality){
 
     const isPng = it.file.type === 'image/png';
     const mime = isPng ? 'image/png' : 'image/jpeg';
-    const blob = await new Promise(res => canvas.toBlob(res, mime, isPng ? undefined : quality));
+    const blob = await new Promise((res, rej) =>
+      canvas.toBlob(b => b ? res(b) : rej(new Error('could not encode the image')), mime, isPng ? undefined : quality));
+    bitmap.close && bitmap.close();
 
     it.blob = blob;
     it.newSize = blob.size;
     it.outW = outW;
     it.outH = outH;
+    it.outMime = mime;
     it.status = 'done';
-    bitmap.close && bitmap.close();
+
+    // HEIC thumbnails don't render outside Safari — show the converted JPG instead
+    if(it.heic || it.thumbFailed){
+      URL.revokeObjectURL(it.thumbURL);
+      it.thumbURL = URL.createObjectURL(blob);
+      it.thumbFailed = false;
+    }
   } catch(err){
     it.status = 'error';
-    it.error = err.message;
+    it.error = (err && err.message) || 'could not process this file';
   }
+  it.phase = null;
   render();
 }
 
-function outName(originalName){
-  const addSuffix = suffixToggle.checked;
-  if(!addSuffix) return originalName;
+// Extension follows the exported format: anything encoded as JPEG
+// (HEIC, WebP, etc.) gets .jpg; existing .jpg/.jpeg names are kept as-is.
+function outName(it){
+  const originalName = it.file.name;
   const dot = originalName.lastIndexOf('.');
-  if(dot === -1) return originalName + '-web';
-  return originalName.slice(0,dot) + '-web' + originalName.slice(dot);
+  let base = dot === -1 ? originalName : originalName.slice(0, dot);
+  let ext = dot === -1 ? '' : originalName.slice(dot);
+  if(it.outMime === 'image/jpeg' && !/^\.jpe?g$/i.test(ext)) ext = '.jpg';
+  if(suffixToggle.checked) base += '-web';
+  return base + ext;
 }
 
 processBtn.addEventListener('click', async () => {
@@ -555,7 +652,7 @@ processBtn.addEventListener('click', async () => {
     await processOne(it, maxDim, quality);
     if(it.status === 'done' && useFS && dirHandle){
       try{
-        const fileHandle = await dirHandle.getFileHandle(outName(it.file.name), {create:true});
+        const fileHandle = await dirHandle.getFileHandle(outName(it), {create:true});
         const writable = await fileHandle.createWritable();
         await writable.write(it.blob);
         await writable.close();
@@ -577,7 +674,7 @@ processBtn.addEventListener('click', async () => {
       const url = URL.createObjectURL(it.blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = outName(it.file.name);
+      a.download = outName(it);
       document.body.appendChild(a);
       a.click();
       a.remove();
